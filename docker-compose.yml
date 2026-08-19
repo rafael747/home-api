@@ -4,5 +4,8 @@ services:
     restart: unless-stopped
     ports:
       - "8001:7000"
+    devices:
+      - "/dev/sr0:/dev/sr0"
+    privileged: true
     env_file:
       - .env

@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile, Security, Form, Body
 from fastapi.security import APIKeyHeader
 from pywa import WhatsApp, types
+import subprocess
 
 load_dotenv()
 
@@ -60,6 +61,15 @@ def paperless_backup_notification(json: dict = Body(...)):
         print(f"Sent notification to {number}: {msg}")
     return {"status": "ok"}
 
+@app.get("/eject-tray")
+def eject_tray():
+    try:
+        print("Opening DVD tray...")
+        subprocess.run(["eject", "/dev/sr0"], check=True)
+        return {"status": "ok"}
+    except subprocess.CalledProcessError as e:
+        print(f"Hardware error: {e}")
+        return {"status": "error"}
 
 @app.post("/paperless-document-notify")
 def paperless_document_notification(

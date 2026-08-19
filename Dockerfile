@@ -11,6 +11,10 @@ RUN uv sync
 
 FROM python:3.14-slim AS runner
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends eject \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /code
 
 COPY --from=builder /code/.venv /code/.venv
