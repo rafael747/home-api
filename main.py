@@ -1,6 +1,15 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile, Security, Form, Body
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    Security,
+    Form,
+    Body,
+)
 from fastapi.security import APIKeyHeader
 from pywa import WhatsApp, types
 import subprocess
@@ -21,13 +30,12 @@ wa = WhatsApp(
     token=TOKEN,
 )
 
+
 @app.get("/test")
 def test():
-    wa.send_message(
-        to=PAPERLESS_NOTIFICATION_NUMBERS[0],
-        text="Hello, world!"
-    )
+    wa.send_message(to=PAPERLESS_NOTIFICATION_NUMBERS[0], text="Hello, world!")
     return {"status": "ok"}
+
 
 @app.post("/soil_moisture")
 def soil_moisture(
@@ -35,31 +43,36 @@ def soil_moisture(
 ):
     print(json)
 
-    wa.send_message(
-        to=PAPERLESS_NOTIFICATION_NUMBERS[0],
-        text=f"Data: {json}"
-    )
+    wa.send_message(to=PAPERLESS_NOTIFICATION_NUMBERS[0], text=f"Data: {json}")
 
     return {"status": "ok"}
 
-@app.post("/paperless-backup-notify")
-def paperless_backup_notification(json: dict = Body(...)):
 
-    percentage_full = json["percentage_full"]
-    megabytes_free = json["megabytes_free"]
-
-
+def send_backup_notifications(percentage_full, megabytes_free):
     for number in PAPERLESS_NOTIFICATION_NUMBERS:
         msg = wa.send_template(
             to=number,
             name="paperless_dvd_backup_alert_1",
             language=types.templates.TemplateLanguage.ENGLISH,
-            params=[
-                types.templates.BodyText.params(percentage_full, megabytes_free)
-            ],
+            params=[types.templates.BodyText.params(percentage_full, megabytes_free)],
         )
         print(f"Sent notification to {number}: {msg}")
+
+
+@app.post("/paperless-backup-notify")
+def paperless_backup_notification(
+    background_tasks: BackgroundTasks,
+    json: dict = Body(...),
+):
+
+    percentage_full = json["percentage_full"]
+    megabytes_free = json["megabytes_free"]
+
+    background_tasks.add_task(
+        send_backup_notifications, percentage_full, megabytes_free
+    )
     return {"status": "ok"}
+
 
 @app.get("/eject-tray")
 def eject_tray():
@@ -71,23 +84,8 @@ def eject_tray():
         print(f"Hardware error: {e}")
         return {"status": "error"}
 
-@app.post("/paperless-document-notify")
-def paperless_document_notification(
-    api_key=Security(APIKeyHeader(name="X-API-Key")),
-    file: UploadFile = File(...),
-    title: str = Form(...),
-    filename: str = Form(...),
-):
-    """Receive a POST webhook with X-API-Key header and a document in the form body."""
-    if not PAPERLESS_WEBHOOK_TOKEN or not api_key:
-        raise HTTPException(status_code=401, detail="Missing authorization")
-    if api_key != PAPERLESS_WEBHOOK_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Document from form body (multipart/form-data)
-
-    file_content = file.file.read()
-
+def send_document_notifications(title, filename, file_content, mime_type):
     for number in PAPERLESS_NOTIFICATION_NUMBERS:
         msg = wa.send_template(
             to=number,
@@ -101,9 +99,35 @@ def paperless_document_notification(
                 types.templates.HeaderDocument.params(
                     document=file_content,
                     filename=filename,
-                    mime_type=file.content_type,
+                    mime_type=mime_type,
                 ),
             ],
         )
         print(f"Sent notification to {number}: {msg}")
+
+
+@app.post("/paperless-document-notify")
+def paperless_document_notification(
+    background_tasks: BackgroundTasks,
+    api_key=Security(APIKeyHeader(name="X-API-Key")),
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    filename: str = Form(...),
+):
+    """Receive a POST webhook with X-API-Key header and a document in the form body."""
+    if not PAPERLESS_WEBHOOK_TOKEN or not api_key:
+        raise HTTPException(status_code=401, detail="Missing authorization")
+    if api_key != PAPERLESS_WEBHOOK_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Read before returning — UploadFile is closed once the response is sent
+    file_content = file.file.read()
+
+    background_tasks.add_task(
+        send_document_notifications,
+        title,
+        filename,
+        file_content,
+        file.content_type,
+    )
     return {"status": "ok"}
